@@ -418,8 +418,13 @@ i32 Raphael::negamax(
         const i32 new_depth = depth - 1 + extension;
         if (depth >= LMR_DEPTH && move_searched > LMR_FROMMOVE && is_quiet) {
             // late move reduction
-            const i32 red_factor = LMR_TABLE[is_quiet][depth][move_searched] + !is_PV * LMR_NONPV;
+            i32 red_factor = LMR_TABLE[is_quiet][depth][move_searched] + !is_PV * LMR_NONPV;
+            if (cutnode) {
+                red_factor += 128;    
+            }
             const i32 red_depth = min(max(new_depth - red_factor / 128, 1), new_depth);
+            
+
             score = -negamax<false>(
                 red_depth, ply + 1, mvidx + 1, -alpha - 1, -alpha, true, ss + 1, halt
             );
