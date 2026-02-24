@@ -375,9 +375,12 @@ i32 Raphael::negamax(
                 }
             }
 
+            const i32 history
+                = is_quiet ? 0 : history_.get_noisyscore(move, board.get_captured(move));
+
             // SEE pruning
             const i32 see_thresh = (is_quiet) ? SEE_QUIET_DEPTH_SCALE * lmr_depth * lmr_depth
-                                              : SEE_NOISY_DEPTH_SCALE * depth;
+                                              : SEE_NOISY_DEPTH_SCALE * depth - history / 128;
             if (!SEE::see(move, board, see_thresh)) continue;
         }
 
