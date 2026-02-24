@@ -26,6 +26,7 @@ MoveGenerator MoveGenerator::quiescence(
     );
 }
 
+MoveGenerator::Stage MoveGenerator::current_stage() const { return stage_; }
 
 chess::Move MoveGenerator::next() {
     switch (stage_) {
