@@ -39,8 +39,8 @@ const Nnue::NnueParams* Nnue::load_network() {
 i32 Nnue::evaluate(const chess::Board& board) {
     // get address to accumulators
     const auto& acc = state_.get_top_accumulator(board);
-    const auto stm_acc = acc.values[board.stm()];
-    const auto ntm_acc = acc.values[~board.stm()];
+    const auto stm_acc = acc.psq_vals[board.stm()];
+    const auto ntm_acc = acc.psq_vals[~board.stm()];
 
     alignas(ALIGNMENT) u8 l0_out[L1_SIZE];
     SparseIterator sp;

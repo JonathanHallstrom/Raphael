@@ -68,33 +68,33 @@ private:
 
 class NnueAccumulator {
 public:
-    enum class PSQState : u8 { CLEAN = 0, DIRTY, REFRESH };
+    enum class AccState : u8 { CLEAN = 0, DIRTY, REFRESH };
 
-    alignas(ALIGNMENT) i16 values[2][L1_SIZE];
+    alignas(ALIGNMENT) i16 psq_vals[2][L1_SIZE];
 
 private:
     StaticVector<PSQFeature, 2> psq_adds;
     StaticVector<PSQFeature, 2> psq_subs;
-    PSQState psq_state[2];
+    AccState psq_state[2];
 
 
 public:
     /** Initializes the accumulator */
     NnueAccumulator() = default;
 
-    /** Returns the stm accumulator state
+    /** Returns the stm psq accumulator state
      *
      * \param perspective which accumulator to check
      * \returns the PSQ state of the stm accumulator
      */
-    PSQState get_psq_state(chess::Color perspective) const;
+    AccState get_psq_state(chess::Color perspective) const;
 
-    /** Sets the stm accumulator state
+    /** Sets the stm psq accumulator state
      *
      * \param perspective side to set
      * \param state new state
      */
-    void set_psq_state(chess::Color perspective, PSQState state);
+    void set_psq_state(chess::Color perspective, AccState state);
 
     /** Adds a new piece to the accumulator
      *
@@ -113,7 +113,7 @@ public:
     /** Prepares this accumulator for updates */
     void prepare_updates();
 
-    /** Updates the accumulator values
+    /** Updates the accumulator values using the stored updates
      *
      * \param old_acc accumulator to use as base
      * \param weights start of W0
@@ -127,12 +127,12 @@ public:
         bool mirror
     );
 
-    /** Refreshes the stm accumulator by copying the finny entry
+    /** Refreshes the stm psq accumulator by copying the finny entry
      *
      * \param finny_entry finny entry to copy
-     * \param perspective accumulator perspective
+     * \param perspective psq accumulator perspective
      */
-    void refresh_from(const NnueFinnyEntry& finny_entry, chess::Color perspective);
+    void refresh_psq(const NnueFinnyEntry& finny_entry, chess::Color perspective);
 };
 }  // namespace raphael::nnue
 #endif

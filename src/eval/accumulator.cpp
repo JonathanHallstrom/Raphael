@@ -108,11 +108,11 @@ chess::BitBoard NnueFinnyEntry::occ(chess::PieceType pt, chess::Color color) con
 
 
 
-NnueAccumulator::PSQState NnueAccumulator::get_psq_state(chess::Color perspective) const {
+NnueAccumulator::AccState NnueAccumulator::get_psq_state(chess::Color perspective) const {
     return psq_state[perspective];
 }
 
-void NnueAccumulator::set_psq_state(chess::Color perspective, PSQState state) {
+void NnueAccumulator::set_psq_state(chess::Color perspective, AccState state) {
     psq_state[perspective] = state;
 }
 
@@ -128,8 +128,8 @@ void NnueAccumulator::prepare_updates() {
     // reset psq updates and mark as dirty (as we're going to update them immediately after)
     psq_adds.clear();
     psq_subs.clear();
-    set_psq_state(chess::Color::WHITE, PSQState::DIRTY);
-    set_psq_state(chess::Color::BLACK, PSQState::DIRTY);
+    set_psq_state(chess::Color::WHITE, AccState::DIRTY);
+    set_psq_state(chess::Color::BLACK, AccState::DIRTY);
 }
 
 void NnueAccumulator::apply_updates(
@@ -138,8 +138,8 @@ void NnueAccumulator::apply_updates(
     chess::Color perspective,
     bool mirror
 ) {
-    assert(get_psq_state(perspective) == PSQState::DIRTY);
-    assert(old_acc.get_psq_state(perspective) == PSQState::CLEAN);
+    assert(get_psq_state(perspective) == AccState::DIRTY);
+    assert(old_acc.get_psq_state(perspective) == AccState::CLEAN);
     assert(psq_adds.size() >= 1);
     assert(psq_subs.size() >= 1);
 
@@ -158,7 +158,7 @@ void NnueAccumulator::apply_updates(
     for (i32 i = 0; i < n_chunks; i += 8) {
         #pragma GCC unroll 32
         for (i32 r = 0; r < 8; r++)
-            accs[r] = load_i16(&old_acc.values[perspective][(i + r) * regw]);
+            accs[r] = load_i16(&old_acc.psq_vals[perspective][(i + r) * regw]);
 
         #pragma GCC unroll 32
         for (i32 r = 0; r < 8; r++)
@@ -179,25 +179,25 @@ void NnueAccumulator::apply_updates(
                 accs[r] = add_i16(accs[r], load_i16(&weights[add2][(i + r) * regw]));
 
         #pragma GCC unroll 32
-        for (i32 r = 0; r < 8; r++) store_i16(&values[perspective][(i + r) * regw], accs[r]);
+        for (i32 r = 0; r < 8; r++) store_i16(&psq_vals[perspective][(i + r) * regw], accs[r]);
     }
 #else
     for (i32 i = 0; i < L1_SIZE; i++) {
-        values[perspective][i] = old_acc.values[perspective][i];
+        psq_vals[perspective][i] = old_acc.psq_vals[perspective][i];
 
-        values[perspective][i] -= weights[sub1][i];
-        if (psq_subs.size() > 1) values[perspective][i] -= weights[sub2][i];
-        values[perspective][i] += weights[add1][i];
-        if (psq_adds.size() > 1) values[perspective][i] += weights[add2][i];
+        psq_vals[perspective][i] -= weights[sub1][i];
+        if (psq_subs.size() > 1) psq_vals[perspective][i] -= weights[sub2][i];
+        psq_vals[perspective][i] += weights[add1][i];
+        if (psq_adds.size() > 1) psq_vals[perspective][i] += weights[add2][i];
     }
 #endif
 
     // mark as clean
-    set_psq_state(perspective, PSQState::CLEAN);
+    set_psq_state(perspective, AccState::CLEAN);
 }
 
-void NnueAccumulator::refresh_from(const NnueFinnyEntry& finny_entry, chess::Color perspective) {
-    copy(finny_entry.values, finny_entry.values + L1_SIZE, values[perspective]);
-    set_psq_state(perspective, PSQState::CLEAN);
+void NnueAccumulator::refresh_psq(const NnueFinnyEntry& finny_entry, chess::Color perspective) {
+    copy(finny_entry.values, finny_entry.values + L1_SIZE, psq_vals[perspective]);
+    set_psq_state(perspective, AccState::CLEAN);
 }
 #endif

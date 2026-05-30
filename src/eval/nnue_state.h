@@ -9,7 +9,7 @@ namespace raphael::nnue {
 class NnueState {
 private:
     NnueFinnyEntry finny_table_[2][2][N_INBUCKETS];  // finny_table[perspective][mirror][bucket]
-    NnueAccumulator accumulators_[MAX_DEPTH];        // accumulators[ply].values[perspective][index]
+    NnueAccumulator accumulators_[MAX_DEPTH];        // accumulators[ply][perspective][index]
     i32 idx_ = 0;
 
     const i16 (*weights_)[N_INPUTS][L1_SIZE];

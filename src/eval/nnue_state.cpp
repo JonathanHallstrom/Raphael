@@ -18,8 +18,8 @@ const NnueAccumulator& NnueState::get_top_accumulator(const chess::Board& board)
     lazy_update(board, chess::Color::WHITE);
     lazy_update(board, chess::Color::BLACK);
 
-    assert(accumulators_[idx_].get_psq_state(board.stm()) == NnueAccumulator::PSQState::CLEAN);
-    assert(accumulators_[idx_].get_psq_state(~board.stm()) == NnueAccumulator::PSQState::CLEAN);
+    assert(accumulators_[idx_].get_psq_state(board.stm()) == NnueAccumulator::AccState::CLEAN);
+    assert(accumulators_[idx_].get_psq_state(~board.stm()) == NnueAccumulator::AccState::CLEAN);
 
     return accumulators_[idx_];
 }
@@ -33,7 +33,7 @@ void NnueState::set_board(const chess::Board& board) {
         finny_table_[perspective][mirror][bucket].sync(
             weights_[bucket], board, perspective, mirror
         );
-        accumulators_[idx_].refresh_from(finny_table_[perspective][mirror][bucket], perspective);
+        accumulators_[idx_].refresh_psq(finny_table_[perspective][mirror][bucket], perspective);
     }
 }
 
@@ -82,11 +82,11 @@ void NnueState::make_move(const chess::Board& board, chess::Move move) {
     }
 
     // need refresh if previous accumulator needs refresh or we change mirroring/bucket
-    if (accumulators_[idx_ - 1].get_psq_state(stm) == NnueAccumulator::PSQState::REFRESH
+    if (accumulators_[idx_ - 1].get_psq_state(stm) == NnueAccumulator::AccState::REFRESH
         || (from_piece.type() == chess::PieceType::KING
             && ((needs_mirroring(from_sq) != needs_mirroring(new_king_sq))
                 || (king_bucket(from_sq, stm) != king_bucket(new_king_sq, stm)))))
-        accumulators_[idx_].set_psq_state(stm, NnueAccumulator::PSQState::REFRESH);
+        accumulators_[idx_].set_psq_state(stm, NnueAccumulator::AccState::REFRESH);
 }
 
 void NnueState::unmake_move() {
@@ -99,7 +99,7 @@ void NnueState::unmake_move() {
 void NnueState::lazy_update(const chess::Board& board, chess::Color perspective) {
     // find first clean/needs_refresh accumulator
     i32 clean_idx = idx_;
-    while (accumulators_[clean_idx].get_psq_state(perspective) == NnueAccumulator::PSQState::DIRTY)
+    while (accumulators_[clean_idx].get_psq_state(perspective) == NnueAccumulator::AccState::DIRTY)
         clean_idx--;
 
     // horizontal mirroring and king bucket
@@ -107,11 +107,11 @@ void NnueState::lazy_update(const chess::Board& board, chess::Color perspective)
     const auto bucket = king_bucket(board.king_square(perspective), perspective);
 
     // if an accumulator needs refresh, refresh at idx_ since we don't know the board at clean_idx
-    if (accumulators_[clean_idx].get_psq_state(perspective) == NnueAccumulator::PSQState::REFRESH) {
+    if (accumulators_[clean_idx].get_psq_state(perspective) == NnueAccumulator::AccState::REFRESH) {
         finny_table_[perspective][mirror][bucket].sync(
             weights_[bucket], board, perspective, mirror
         );
-        accumulators_[idx_].refresh_from(finny_table_[perspective][mirror][bucket], perspective);
+        accumulators_[idx_].refresh_psq(finny_table_[perspective][mirror][bucket], perspective);
         return;
     }
 
