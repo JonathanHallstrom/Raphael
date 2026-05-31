@@ -102,6 +102,9 @@ public:
     [[nodiscard]] constexpr bool is_back_rank(Color color) const {
         return rank_ == static_cast<underlying>(color * 7);
     }
+    [[nodiscard]] constexpr bool is_back_rank() const {
+        return rank_ == underlying::R1 || rank_ == underlying::R8;
+    }
 
     [[nodiscard]] constexpr Rank relative(Color color) const { return Rank(rank_ ^ (color * 7)); }
 };

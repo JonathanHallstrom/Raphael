@@ -1,16 +1,138 @@
 #ifdef EVAL_NNUE
 #include <eval/accumulator.h>
 
+#include <utility>
+
 using namespace raphael::nnue;
+using std::array;
 using std::copy;
+using std::pair;
+
+
+
+namespace internal {
+static constexpr i32 PIECE_TARGET_MAP[6][6] = {
+    0,  1,  -1, 2,  -1, -1,  // pawn    BQ excluded as P->B/Q implies B/Q->P
+    0,  1,  2,  3,  4,  -1,  // knight  no exclusion as other pieces can't attack N if N->piece
+    0,  1,  2,  3,  -1, -1,  // bishop  Q excluded as B->Q implies Q->B
+    0,  1,  2,  3,  -1, -1,  // rook    Q excluded as R->Q implies Q->R
+    0,  1,  2,  3,  4,  -1,  // queen   no exclusion so threats for other pieces get encoded
+    -1, -1, -1, -1, -1, -1   // king    no threats to and from king
+};
+
+static constexpr i32 PIECE_TARGET_COUNT[6] = {6, 10, 8, 8, 10, 0};  // num included * 2 colors
+
+static constexpr auto compute_piece_indices(chess::Piece piece) {
+    // idx[from][to] = number of squares attacked by piece whose square index is less than to square
+    MultiArray<u8, 64, 64> idx{};
+
+    for (chess::Square from = chess::Square::A1; from <= chess::Square::H8; ++from) {
+        const auto attacks = chess::Attacks::pseudo_attacks(piece, from);
+
+        for (chess::Square to = chess::Square::A1; to <= chess::Square::H8; ++to) {
+            const auto mask = attacks & (chess::BitBoard::from_square(to) - 1);
+            idx[from][to] = mask.count();
+        }
+    }
+
+    return idx;
+}
+
+static constexpr auto PIECE_INDICES = [] {
+    MultiArray<u8, 12, 64, 64> dst{};
+
+    // white and black pawns have different attacks, other pieces are symmetric
+    dst[chess::Piece::WHITEPAWN] = compute_piece_indices(chess::Piece::WHITEPAWN);
+    dst[chess::Piece::BLACKPAWN] = compute_piece_indices(chess::Piece::BLACKPAWN);
+
+    for (chess::PieceType pt = chess::PieceType::KNIGHT; pt <= chess::PieceType::KING; ++pt) {
+        const auto idx = compute_piece_indices(chess::Piece(pt, chess::Color::WHITE));
+        dst[chess::Piece(pt, chess::Color::WHITE)] = idx;
+        dst[chess::Piece(pt, chess::Color::BLACK)] = idx;
+    }
+
+    return dst;
+}();
+
+static constexpr auto OFFSETS = [] {
+    // indices[piece] = {total num squares this piece can attack, global piece threat offset}
+    // offsets[piece][from] = global offset for attacker, attacker square features
+    struct {
+        array<pair<i32, i32>, 12> indicies{};
+        MultiArray<u32, 12, 64> offsets{};
+    } dst{};
+
+    i32 offset = 0;
+
+    for (chess::Piece piece = chess::Piece::WHITEPAWN; piece <= chess::Piece::BLACKKING; ++piece) {
+        i32 piece_offset = 0;
+
+        for (chess::Square from = chess::Square::A1; from <= chess::Square::H8; ++from) {
+            dst.offsets[piece][from] = piece_offset;
+
+            // pawns cannot be on the back rank
+            if (piece.type() != chess::PieceType::PAWN || (!from.rank().is_back_rank())) {
+                const auto attacks = chess::Attacks::pseudo_attacks(piece.color_flipped(), from);
+                piece_offset += attacks.count();
+            }
+        }
+
+        dst.indicies[piece] = {piece_offset, offset};
+        offset += PIECE_TARGET_COUNT[piece.type()] * piece_offset;
+    }
+
+    return dst;
+}();
+
+static constexpr auto ATTACK_INDICIES = [] {
+    // indicies[attacker][attacked][forwards] = global threat index offset
+    MultiArray<u32, 12, 12, 2> dst{};
+
+    for (chess::Piece atk = chess::Piece::WHITEPAWN; atk <= chess::Piece::BLACKKING; ++atk) {
+        for (chess::Piece vic = chess::Piece::WHITEPAWN; vic <= chess::Piece::BLACKKING; ++vic) {
+            const bool is_enemy = atk.color() != vic.color();
+            const auto map = PIECE_TARGET_MAP[atk.type()][vic.type()];
+
+            // attacks between the same piece only gets encoded in one direction to avoid duplicates
+            const bool is_semi_excluded
+                = atk.type() == vic.type() && (is_enemy || atk.type() != chess::PieceType::PAWN);
+            const bool is_excluded = map < 0;
+
+            const auto [piece_offset, offset] = OFFSETS.indicies[atk];
+
+            const auto feature_idx
+                = offset + (vic.color() * PIECE_TARGET_COUNT[atk.type()] / 2 + map) * piece_offset;
+
+            dst[atk][vic][0] = (is_excluded) ? N_THREATS : feature_idx;
+            dst[atk][vic][1] = (is_excluded || is_semi_excluded) ? N_THREATS : feature_idx;
+        }
+    }
+
+    return dst;
+}();
+}  // namespace internal
 
 
 
 i32 PSQFeature::index(chess::Color perspective, bool mirror) const {
-    const auto sq = (mirror) ? square.mirrored() : square;
+    const auto sq = square.mirrored(mirror).relative(perspective);
     const auto pc = (piece.type() == chess::PieceType::KING) ? chess::Piece::WHITEKING
                                                              : piece.relative(perspective);
-    return 64 * pc + sq.relative(perspective);
+    return 64 * pc + sq;
+}
+
+i32 TIFeature::index(chess::Color perspective, bool mirror) const {
+    const auto atk = attacker.relative(perspective);
+    const auto vic = attacked.relative(perspective);
+    const auto atk_sq = attacker_sq.mirrored(mirror).relative(perspective);
+    const auto vic_sq = attacked_sq.mirrored(mirror).relative(perspective);
+
+    const bool forwards = atk_sq < vic_sq;
+    const auto attack_idx = internal::ATTACK_INDICIES[atk][vic][forwards];
+    const auto offset = internal::OFFSETS.offsets[atk][atk_sq];
+    const auto piece_idx = internal::PIECE_INDICES[atk][atk_sq][vic_sq];
+
+    return attack_idx + offset + piece_idx;
 }
 
 
@@ -116,6 +238,14 @@ void NnueAccumulator::set_psq_state(chess::Color perspective, AccState state) {
     psq_state[perspective] = state;
 }
 
+NnueAccumulator::AccState NnueAccumulator::get_ti_state(chess::Color perspective) const {
+    return ti_state[perspective];
+}
+
+void NnueAccumulator::set_ti_state(chess::Color perspective, AccState state) {
+    ti_state[perspective] = state;
+}
+
 void NnueAccumulator::add_piece(chess::Piece piece, chess::Square square) {
     psq_adds.push({.piece = piece, .square = square});
 }
@@ -125,11 +255,15 @@ void NnueAccumulator::rem_piece(chess::Piece piece, chess::Square square) {
 }
 
 void NnueAccumulator::prepare_updates() {
-    // reset psq updates and mark as dirty (as we're going to update them immediately after)
+    // reset updates and mark as dirty (as we're going to update them immediately after)
     psq_adds.clear();
     psq_subs.clear();
+    ti_adds.clear();
+    ti_subs.clear();
     set_psq_state(chess::Color::WHITE, AccState::DIRTY);
     set_psq_state(chess::Color::BLACK, AccState::DIRTY);
+    set_ti_state(chess::Color::WHITE, AccState::DIRTY);
+    set_ti_state(chess::Color::BLACK, AccState::DIRTY);
 }
 
 void NnueAccumulator::apply_updates(
@@ -194,6 +328,7 @@ void NnueAccumulator::apply_updates(
 
     // mark as clean
     set_psq_state(perspective, AccState::CLEAN);
+    set_ti_state(perspective, AccState::CLEAN);
 }
 
 void NnueAccumulator::refresh_psq(const NnueFinnyEntry& finny_entry, chess::Color perspective) {

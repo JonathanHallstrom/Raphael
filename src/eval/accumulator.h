@@ -19,6 +19,15 @@ struct PSQFeature {
     i32 index(chess::Color perspective, bool mirror) const;
 };
 
+struct TIFeature {
+    chess::Piece attacker;
+    chess::Piece attacked;
+    chess::Square attacker_sq;
+    chess::Square attacked_sq;
+
+    i32 index(chess::Color perspective, bool mirror) const;
+};
+
 
 
 class NnueFinnyEntry {
@@ -71,11 +80,16 @@ public:
     enum class AccState : u8 { CLEAN = 0, DIRTY, REFRESH };
 
     alignas(ALIGNMENT) i16 psq_vals[2][L1_SIZE];
+    alignas(ALIGNMENT) i16 ti_vals[2][L1_SIZE];
 
 private:
     StaticVector<PSQFeature, 2> psq_adds;
     StaticVector<PSQFeature, 2> psq_subs;
+    StaticVector<TIFeature, 128> ti_adds;
+    StaticVector<TIFeature, 128> ti_subs;
+
     AccState psq_state[2];
+    AccState ti_state[2];
 
 
 public:
@@ -85,7 +99,7 @@ public:
     /** Returns the stm psq accumulator state
      *
      * \param perspective which accumulator to check
-     * \returns the PSQ state of the stm accumulator
+     * \returns the psq state of the stm accumulator
      */
     AccState get_psq_state(chess::Color perspective) const;
 
@@ -95,6 +109,20 @@ public:
      * \param state new state
      */
     void set_psq_state(chess::Color perspective, AccState state);
+
+    /** Returns the stm ti accumulator state
+     *
+     * \param perspective which accumulator to check
+     * \returns the ti state of the stm accumulator
+     */
+    AccState get_ti_state(chess::Color perspective) const;
+
+    /** Sets the stm ti accumulator state
+     *
+     * \param perspective side to set
+     * \param state new state
+     */
+    void set_ti_state(chess::Color perspective, AccState state);
 
     /** Adds a new piece to the accumulator
      *
