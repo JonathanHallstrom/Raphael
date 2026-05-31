@@ -1,6 +1,8 @@
 #pragma once
 #include <chess/bitboard.h>
 
+#include <type_traits>
+
 #ifdef CHESS_USE_PEXT
     #include <immintrin.h>
 #endif
@@ -269,11 +271,15 @@ public:
         return pawns.shifted<dir>();
     }
 
-    [[nodiscard]] static BitBoard pawn(Square sq, Color color) { return PAWN_ATTACKS[color][sq]; }
+    [[nodiscard]] static constexpr BitBoard pawn(Square sq, Color color) {
+        return PAWN_ATTACKS[color][sq];
+    }
 
-    [[nodiscard]] static BitBoard knight(Square sq) { return KNIGHT_ATTACKS[sq]; }
+    [[nodiscard]] static constexpr BitBoard knight(Square sq) { return KNIGHT_ATTACKS[sq]; }
 
-    [[nodiscard]] static BitBoard bishop(Square sq, BitBoard occupied) {
+    [[nodiscard]] static constexpr BitBoard bishop(Square sq, BitBoard occupied) {
+        if (std::is_constant_evaluated()) return get_slider_attacks<false>(sq, occupied);
+
         const auto& entry = BISHOP_TABLE[sq];
 #ifdef CHESS_USE_PEXT
         u64 index = _pext_u64(static_cast<u64>(occupied), static_cast<u64>(entry.mask));
@@ -283,7 +289,9 @@ public:
         return entry.attacks[index];
     }
 
-    [[nodiscard]] static BitBoard rook(Square sq, BitBoard occupied) {
+    [[nodiscard]] static constexpr BitBoard rook(Square sq, BitBoard occupied) {
+        if (std::is_constant_evaluated()) return get_slider_attacks<true>(sq, occupied);
+
         const auto& entry = ROOK_TABLE[sq];
 #ifdef CHESS_USE_PEXT
         u64 index = _pext_u64(static_cast<u64>(occupied), static_cast<u64>(entry.mask));
@@ -293,18 +301,18 @@ public:
         return entry.attacks[index];
     }
 
-    [[nodiscard]] static BitBoard queen(Square sq, BitBoard occupied) {
+    [[nodiscard]] static constexpr BitBoard queen(Square sq, BitBoard occupied) {
         return bishop(sq, occupied) | rook(sq, occupied);
     }
 
-    [[nodiscard]] static BitBoard king(Square sq) { return KING_ATTACKS[sq]; }
+    [[nodiscard]] static constexpr BitBoard king(Square sq) { return KING_ATTACKS[sq]; }
 
-    [[nodiscard]] static BitBoard between(Square sq1, Square sq2) {
+    [[nodiscard]] static constexpr BitBoard between(Square sq1, Square sq2) {
         return SQUARES_BETWEEN[sq1][sq2];
     }
 
     template <PieceType::underlying pt>
-    [[nodiscard]] static BitBoard slider(Square sq, BitBoard occupied) {
+    [[nodiscard]] static constexpr BitBoard slider(Square sq, BitBoard occupied) {
         static_assert(pt == PieceType::BISHOP || pt == PieceType::ROOK || pt == PieceType::QUEEN);
 
         if constexpr (pt == PieceType::BISHOP) return bishop(sq, occupied);
@@ -312,15 +320,29 @@ public:
         if constexpr (pt == PieceType::QUEEN) return queen(sq, occupied);
     }
 
-    [[nodiscard]] static BitBoard nonpawn_attack(PieceType pt, Square sq, BitBoard occupied) {
-        assert(pt != PieceType::NONE);
-        assert(pt != PieceType::PAWN);
+    [[nodiscard]] static constexpr BitBoard attacks(Piece piece, Square sq, BitBoard occupied) {
+        assert(piece != Piece::NONE);
 
-        switch (pt) {
+        switch (piece.type()) {
+            case PieceType::PAWN: return pawn(sq, piece.color());
             case PieceType::KNIGHT: return knight(sq);
             case PieceType::BISHOP: return bishop(sq, occupied);
             case PieceType::ROOK: return rook(sq, occupied);
             case PieceType::QUEEN: return queen(sq, occupied);
+            case PieceType::KING: return king(sq);
+            default: __builtin_unreachable();
+        }
+    }
+
+    [[nodiscard]] static constexpr BitBoard pseudo_attacks(Piece piece, Square sq) {
+        assert(piece != Piece::NONE);
+
+        switch (piece.type()) {
+            case PieceType::PAWN: return pawn(sq, piece.color());
+            case PieceType::KNIGHT: return knight(sq);
+            case PieceType::BISHOP: return bishop(sq, BitBoard(0));
+            case PieceType::ROOK: return rook(sq, BitBoard(0));
+            case PieceType::QUEEN: return queen(sq, BitBoard(0));
             case PieceType::KING: return king(sq);
             default: __builtin_unreachable();
         }
@@ -392,20 +414,20 @@ private:
         }
     }
 
-    template <bool is_rook>
-    [[nodiscard]] static BitBoard get_slider_attacks(Square sq, BitBoard occupied) {
-        static constexpr i32 dirs[2][4][2] = {
-            {{1, 1}, {1, -1}, {-1, -1}, {-1, 1}}, // bishops
-            {{1, 0}, {0, -1}, {-1, 0},  {0, 1} }  // rooks
-        };
+    static constexpr i32 slider_dirs[2][4][2] = {
+        {{1, 1}, {1, -1}, {-1, -1}, {-1, 1}}, // bishops
+        {{1, 0}, {0, -1}, {-1, 0},  {0, 1} }  // rooks
+    };
 
+    template <bool is_rook>
+    [[nodiscard]] static constexpr BitBoard get_slider_attacks(Square sq, BitBoard occupied) {
         i32 f0 = sq.file();
         i32 r0 = sq.rank();
 
         BitBoard attacks = 0;
         for (i32 i = 0; i < 4; i++) {
-            const i32 df = dirs[is_rook][i][0];
-            const i32 dr = dirs[is_rook][i][1];
+            const i32 df = slider_dirs[is_rook][i][0];
+            const i32 dr = slider_dirs[is_rook][i][1];
 
             i32 f;
             i32 r;

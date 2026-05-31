@@ -126,7 +126,7 @@ bool NnueState::needs_mirroring(chess::Square king_sq) { return king_sq.file() >
 
 i32 NnueState::king_bucket(chess::Square king_sq, chess::Color perspective) {
     const bool mirror = needs_mirroring(king_sq);
-    const auto sq = ((mirror) ? king_sq.mirrored() : king_sq).relative(perspective);
+    const auto sq = king_sq.mirrored(mirror).relative(perspective);
     return BUCKETS[4 * sq.rank() + sq.file()];
 }
 #endif

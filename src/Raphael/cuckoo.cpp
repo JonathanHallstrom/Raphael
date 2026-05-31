@@ -17,7 +17,7 @@ Cuckoo::Cuckoo() {
 
         for (chess::Square sq0 = chess::Square::A1; sq0 <= chess::Square::H8; ++sq0) {
             for (chess::Square sq1 = sq0 + 1; sq1 <= chess::Square::H8; ++sq1) {
-                if (!chess::Attacks::nonpawn_attack(piece.type(), sq0, 0).is_set(sq1)) continue;
+                if (!chess::Attacks::attacks(piece, sq0, 0).is_set(sq1)) continue;
 
                 auto move = chess::Move::make(sq0, sq1);
                 u64 key_delta = chess::Zobrist::piece(piece, sq0)
