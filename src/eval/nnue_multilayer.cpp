@@ -21,7 +21,7 @@ INCBIN(unsigned char, netfile, TOSTRING(NETWORK_FILE));
 
 
 
-Nnue::Nnue(): params(load_network()), state_(params->W0, params->b0) {}
+Nnue::Nnue(): params(load_network()), state_(params->W0, params->b0, nullptr, nullptr) {}  // FIXME:
 
 const Nnue::NnueParams* Nnue::load_network() {
     constexpr usize padded_size = 64 * ((sizeof(NnueParams) + 63) / 64);
@@ -44,6 +44,7 @@ i32 Nnue::evaluate(const chess::Board& board) {
 
     alignas(ALIGNMENT) u8 l0_out[L1_SIZE];
     SparseIterator sp;
+    // FIXME: use ti accumulators too
     activate_l0(stm_acc, l0_out, sp);
     activate_l0(ntm_acc, l0_out + L1_SIZE / 2, sp);
 

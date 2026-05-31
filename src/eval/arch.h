@@ -6,7 +6,7 @@
 
 namespace raphael::nnue {
 static constexpr i32 OUTPUT_SCALE = 279;
-static constexpr i32 N_INPUTS = 11 * 64;  // FIXME: rename to N_PSQ
+static constexpr i32 N_PSQ = 11 * 64;
 static constexpr i32 N_THREATS = 60144;
 static constexpr i32 L1_SIZE = 1280;
 static constexpr i32 L2_SIZE = 16;

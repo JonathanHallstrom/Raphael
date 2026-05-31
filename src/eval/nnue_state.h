@@ -12,16 +12,25 @@ private:
     NnueAccumulator accumulators_[MAX_DEPTH];        // accumulators[ply][perspective][index]
     i32 idx_ = 0;
 
-    const i16 (*weights_)[N_INPUTS][L1_SIZE];
+    const i16 (*psq_weights_)[N_PSQ][L1_SIZE];
+    const i8 (*ti_weights_)[L1_SIZE];
+    const i8* ti_biases_;
 
 
 public:
     /** Initializes the NnueState
      *
-     * \param W0 start of W0 array
-     * \param b0 start of b0 array
+     * \param psq_W0 start of psq W0 array
+     * \param psq_b0 start of psq b0 array
+     * \param ti_W0 start of ti W0 array
+     * \param ti_b0 start of ti b0 array
      */
-    NnueState(const i16 W0[N_INBUCKETS][N_INPUTS][L1_SIZE], const i16 b0[L1_SIZE]);
+    NnueState(
+        const i16 psq_W0[N_INBUCKETS][N_PSQ][L1_SIZE],
+        const i16 psq_b0[L1_SIZE],
+        const i8 ti_W0[N_THREATS][L1_SIZE],
+        const i8 ti_b0[L1_SIZE]
+    );
 
     /** Lazily updates the accumulator stacks and returns the top accumulator
      *

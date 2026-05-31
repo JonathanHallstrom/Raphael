@@ -57,7 +57,7 @@ public:
      * \param mirror whether to mirror the board, should match this entry's mirroring
      */
     void sync(
-        const i16 weights[N_INPUTS][L1_SIZE],
+        const i16 weights[N_PSQ][L1_SIZE],
         const chess::Board& board,
         chess::Color perspective,
         bool mirror
@@ -124,33 +124,75 @@ public:
      */
     void set_ti_state(chess::Color perspective, AccState state);
 
-    /** Adds a new piece to the accumulator
+    /** Adds a psq feature to the accumulator
      *
      * \param piece piece to add
      * \param square square to add piece to
      */
-    void add_piece(chess::Piece piece, chess::Square square);
+    void add_psq(chess::Piece piece, chess::Square square);
 
-    /** Removes a piece from the accumulator
+    /** Removes a psq feature from the accumulator
      *
      * \param piece piece to remove
      * \param square square to remove piece from
      */
-    void rem_piece(chess::Piece piece, chess::Square square);
+    void rem_psq(chess::Piece piece, chess::Square square);
+
+    /** Adds a ti feature to the accumulator
+     *
+     * \param attacker attacking piece
+     * \param attacked attacked piece
+     * \param attacker_sq square of attacking piece
+     * \param attacked_sq square of attacked piece
+     */
+    void add_ti(
+        chess::Piece attacker,
+        chess::Piece attacked,
+        chess::Square attacker_sq,
+        chess::Square attacked_sq
+    );
+
+    /** Removes a ti feature from the accumulator
+     *
+     * \param attacker attacking piece
+     * \param attacked attacked piece
+     * \param attacker_sq square of attacking piece
+     * \param attacked_sq square of attacked piece
+     */
+    void rem_ti(
+        chess::Piece attacker,
+        chess::Piece attacked,
+        chess::Square attacker_sq,
+        chess::Square attacked_sq
+    );
 
     /** Prepares this accumulator for updates */
     void prepare_updates();
 
-    /** Updates the accumulator values using the stored updates
+    /** Updates the psq accumulator values using the stored psq updates
      *
      * \param old_acc accumulator to use as base
-     * \param weights start of W0
+     * \param weights start of psq W0
      * \param perspective accumulator perspective
      * \param mirror whether to mirror the board
      */
-    void apply_updates(
+    void apply_psq_updates(
         const NnueAccumulator& old_acc,
-        const i16 weights[N_INPUTS][L1_SIZE],
+        const i16 weights[N_PSQ][L1_SIZE],
+        chess::Color perspective,
+        bool mirror
+    );
+
+    /** Updates the ti accumulator values using the stored ti updates
+     *
+     * \param old_acc accumulator to use as base
+     * \param weights start of ti W0
+     * \param perspective accumulator perspective
+     * \param mirror whether to mirror the board
+     */
+    void apply_ti_updates(
+        const NnueAccumulator& old_acc,
+        const i8 weights[N_THREATS][L1_SIZE],
         chess::Color perspective,
         bool mirror
     );
@@ -161,6 +203,8 @@ public:
      * \param perspective psq accumulator perspective
      */
     void refresh_psq(const NnueFinnyEntry& finny_entry, chess::Color perspective);
+
+    // FIXME: add refresh_ti
 };
 }  // namespace raphael::nnue
 #endif

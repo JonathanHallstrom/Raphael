@@ -5,13 +5,18 @@ using namespace raphael::nnue;
 
 
 
-NnueState::NnueState(const i16 W0[N_INBUCKETS][N_INPUTS][L1_SIZE], const i16 b0[L1_SIZE])
-    : idx_(0), weights_(W0) {
+NnueState::NnueState(
+    const i16 psq_W0[N_INBUCKETS][N_PSQ][L1_SIZE],
+    const i16 psq_b0[L1_SIZE],
+    const i8 ti_W0[N_THREATS][L1_SIZE],
+    const i8 ti_b0[L1_SIZE]
+)
+    : idx_(0), psq_weights_(psq_W0), ti_weights_(ti_W0), ti_biases_(ti_b0) {
     // set the finny table entries to the bias
     for (const auto perspective : {chess::Color::WHITE, chess::Color::BLACK})
         for (const auto mirror : {false, true})
             for (i32 bucket = 0; bucket < N_INBUCKETS; bucket++)
-                finny_table_[perspective][mirror][bucket].initialize(b0);
+                finny_table_[perspective][mirror][bucket].initialize(psq_b0);
 }
 
 const NnueAccumulator& NnueState::get_top_accumulator(const chess::Board& board) {
@@ -30,10 +35,13 @@ void NnueState::set_board(const chess::Board& board) {
         const bool mirror = needs_mirroring(board.king_square(perspective));
         const auto bucket = king_bucket(board.king_square(perspective), perspective);
 
+        // refresh psq accumulator from finny table
         finny_table_[perspective][mirror][bucket].sync(
-            weights_[bucket], board, perspective, mirror
+            psq_weights_[bucket], board, perspective, mirror
         );
         accumulators_[idx_].refresh_psq(finny_table_[perspective][mirror][bucket], perspective);
+
+        // FIXME: refresh ti accumulator too
     }
 }
 
@@ -52,12 +60,12 @@ void NnueState::make_move(const chess::Board& board, chess::Move move) {
     accumulators_[idx_].prepare_updates();
 
     // remove moving piece
-    accumulators_[idx_].rem_piece(from_piece, from_sq);
+    accumulators_[idx_].rem_psq(from_piece, from_sq);
 
     // add moved/promoted piece
     if (move.type() == chess::Move::PROMOTION) {
         const auto promo = chess::Piece(move.promotion_type(), stm);
-        accumulators_[idx_].add_piece(promo, to_sq);
+        accumulators_[idx_].add_psq(promo, to_sq);
     } else if (move.type() == chess::Move::CASTLING) {
         assert(from_piece.type() == chess::PieceType::KING);
         assert(to_piece.type() == chess::PieceType::ROOK);
@@ -65,20 +73,20 @@ void NnueState::make_move(const chess::Board& board, chess::Move move) {
         const bool is_king_side = to_sq > from_sq;
         new_king_sq = chess::Square::castling_king_dest(is_king_side, stm);
         const auto rook_sq = chess::Square::castling_rook_dest(is_king_side, stm);
-        accumulators_[idx_].add_piece(from_piece, new_king_sq);
-        accumulators_[idx_].add_piece(to_piece, rook_sq);
+        accumulators_[idx_].add_psq(from_piece, new_king_sq);
+        accumulators_[idx_].add_psq(to_piece, rook_sq);
     } else
-        accumulators_[idx_].add_piece(from_piece, to_sq);
+        accumulators_[idx_].add_psq(from_piece, to_sq);
 
     // add captured piece/ep pawn/castling rook
     if (to_piece != chess::Piece::NONE)
-        accumulators_[idx_].rem_piece(to_piece, to_sq);
+        accumulators_[idx_].rem_psq(to_piece, to_sq);
     else if (move.type() == chess::Move::ENPASSANT) {
         assert(from_piece.type() == chess::PieceType::PAWN);
 
         const auto ep_pawn = from_piece.color_flipped();
         const auto ep_sq = to_sq.ep_square();
-        accumulators_[idx_].rem_piece(ep_pawn, ep_sq);
+        accumulators_[idx_].rem_psq(ep_pawn, ep_sq);
     }
 
     // need refresh if previous accumulator needs refresh or we change mirroring/bucket
@@ -97,29 +105,43 @@ void NnueState::unmake_move() {
 
 
 void NnueState::lazy_update(const chess::Board& board, chess::Color perspective) {
-    // find first clean/needs_refresh accumulator
-    i32 clean_idx = idx_;
-    while (accumulators_[clean_idx].get_psq_state(perspective) == NnueAccumulator::AccState::DIRTY)
-        clean_idx--;
-
     // horizontal mirroring and king bucket
     const bool mirror = needs_mirroring(board.king_square(perspective));
     const auto bucket = king_bucket(board.king_square(perspective), perspective);
 
-    // if an accumulator needs refresh, refresh at idx_ since we don't know the board at clean_idx
+    // find first clean/needs_refresh psq accumulator
+    i32 clean_idx = idx_;
+    while (accumulators_[clean_idx].get_psq_state(perspective) == NnueAccumulator::AccState::DIRTY)
+        clean_idx--;
+
     if (accumulators_[clean_idx].get_psq_state(perspective) == NnueAccumulator::AccState::REFRESH) {
+        // if we need to refresh, refresh at idx_ since we don't know the board state at clean_idx
         finny_table_[perspective][mirror][bucket].sync(
-            weights_[bucket], board, perspective, mirror
+            psq_weights_[bucket], board, perspective, mirror
         );
         accumulators_[idx_].refresh_psq(finny_table_[perspective][mirror][bucket], perspective);
-        return;
-    }
+    } else
+        // otherwise, apply psq updates up the stack
+        while (clean_idx++ < idx_)
+            accumulators_[clean_idx].apply_psq_updates(
+                accumulators_[clean_idx - 1], psq_weights_[bucket], perspective, mirror
+            );
 
-    // apply update up the stack
-    while (clean_idx++ < idx_)
-        accumulators_[clean_idx].apply_updates(
-            accumulators_[clean_idx - 1], weights_[bucket], perspective, mirror
-        );
+    // find first clean/needs_refresh ti accumulator
+    clean_idx = idx_;
+    while (accumulators_[clean_idx].get_ti_state(perspective) == NnueAccumulator::AccState::DIRTY)
+        clean_idx--;
+
+    if (accumulators_[clean_idx].get_ti_state(perspective) == NnueAccumulator::AccState::REFRESH) {
+        // if we need to refresh, refresh at idx_ since we don't know the board state at clean_idx
+        // FIXME: actually do something
+        return;
+    } else
+        // otherwise, apply ti updates up the stack
+        while (clean_idx++ < idx_)
+            accumulators_[clean_idx].apply_ti_updates(
+                accumulators_[clean_idx - 1], ti_weights_, perspective, mirror
+            );
 }
 
 bool NnueState::needs_mirroring(chess::Square king_sq) { return king_sq.file() > chess::File::D; }

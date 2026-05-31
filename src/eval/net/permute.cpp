@@ -29,6 +29,7 @@ public:
     };
 
     void permute_network() {
+        // FIXME: account for ti weights and biases too
         const auto current_perm = original_params->permutation;
         const auto current_idx = static_cast<u8>(current_perm);
         if (current_idx > 2) throw runtime_error("invalid network permutation");
@@ -101,7 +102,7 @@ private:
     void apply_perm(const u8 perm[8]) {
         // permute W0 to cancel out packus
         for (usize b = 0; b < nnue::N_INBUCKETS; b++) {
-            for (usize i = 0; i < nnue::N_INPUTS; i++) {
+            for (usize i = 0; i < nnue::N_PSQ; i++) {
                 for (usize j = 0; j < nnue::L1_SIZE; j += 64) {
                     const auto src = &original_params->W0[b][i][j];
                     auto dst = &processed_params->W0[b][i][j];

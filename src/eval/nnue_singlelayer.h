@@ -11,7 +11,7 @@ public:
     enum class NnuePerm : u8 { NONE = 0, AVX2 = 1, AVX512 = 2 };
     struct NnueParams {
         // accumulator: N_INPUTS -> L1_SIZE
-        alignas(ALIGNMENT) i16 W0[N_INBUCKETS][N_INPUTS][L1_SIZE];
+        alignas(ALIGNMENT) i16 W0[N_INBUCKETS][N_PSQ][L1_SIZE];
         alignas(ALIGNMENT) i16 b0[L1_SIZE];
         // layer1: L1_SIZE -> 1
         alignas(ALIGNMENT) i16 W1[N_OUTBUCKETS][L1_SIZE];

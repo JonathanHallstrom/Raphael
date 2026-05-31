@@ -142,7 +142,7 @@ void NnueFinnyEntry::initialize(const i16 biases[L1_SIZE]) {
 }
 
 void NnueFinnyEntry::sync(
-    const i16 weights[N_INPUTS][L1_SIZE],
+    const i16 weights[N_PSQ][L1_SIZE],
     const chess::Board& board,
     chess::Color perspective,
     bool mirror
@@ -246,12 +246,40 @@ void NnueAccumulator::set_ti_state(chess::Color perspective, AccState state) {
     ti_state[perspective] = state;
 }
 
-void NnueAccumulator::add_piece(chess::Piece piece, chess::Square square) {
+void NnueAccumulator::add_psq(chess::Piece piece, chess::Square square) {
     psq_adds.push({.piece = piece, .square = square});
 }
 
-void NnueAccumulator::rem_piece(chess::Piece piece, chess::Square square) {
+void NnueAccumulator::rem_psq(chess::Piece piece, chess::Square square) {
     psq_subs.push({.piece = piece, .square = square});
+}
+
+void NnueAccumulator::add_ti(
+    chess::Piece attacker,
+    chess::Piece attacked,
+    chess::Square attacker_sq,
+    chess::Square attacked_sq
+) {
+    ti_adds.push({
+        .attacker = attacker,
+        .attacked = attacked,
+        .attacker_sq = attacker_sq,
+        .attacked_sq = attacked_sq,
+    });
+}
+
+void NnueAccumulator::rem_ti(
+    chess::Piece attacker,
+    chess::Piece attacked,
+    chess::Square attacker_sq,
+    chess::Square attacked_sq
+) {
+    ti_subs.push({
+        .attacker = attacker,
+        .attacked = attacked,
+        .attacker_sq = attacker_sq,
+        .attacked_sq = attacked_sq,
+    });
 }
 
 void NnueAccumulator::prepare_updates() {
@@ -262,13 +290,13 @@ void NnueAccumulator::prepare_updates() {
     ti_subs.clear();
     set_psq_state(chess::Color::WHITE, AccState::DIRTY);
     set_psq_state(chess::Color::BLACK, AccState::DIRTY);
-    set_ti_state(chess::Color::WHITE, AccState::DIRTY);
-    set_ti_state(chess::Color::BLACK, AccState::DIRTY);
+    set_ti_state(chess::Color::WHITE, AccState::REFRESH);  // FIXME: dirty after adding ue
+    set_ti_state(chess::Color::BLACK, AccState::REFRESH);  // here too
 }
 
-void NnueAccumulator::apply_updates(
+void NnueAccumulator::apply_psq_updates(
     const NnueAccumulator& old_acc,
-    const i16 weights[N_INPUTS][L1_SIZE],
+    const i16 weights[N_PSQ][L1_SIZE],
     chess::Color perspective,
     bool mirror
 ) {
@@ -329,6 +357,16 @@ void NnueAccumulator::apply_updates(
     // mark as clean
     set_psq_state(perspective, AccState::CLEAN);
     set_ti_state(perspective, AccState::CLEAN);
+}
+
+void NnueAccumulator::apply_ti_updates(
+    const NnueAccumulator& old_acc,
+    const i8 weights[N_THREATS][L1_SIZE],
+    chess::Color perspective,
+    bool mirror
+) {
+    // FIXME:
+    assert(false);
 }
 
 void NnueAccumulator::refresh_psq(const NnueFinnyEntry& finny_entry, chess::Color perspective) {
