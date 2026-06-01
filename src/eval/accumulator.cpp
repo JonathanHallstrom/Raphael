@@ -391,8 +391,6 @@ void NnueAccumulator::refresh_ti(
         }
     }
 
-    return;  // FIXME: make sure weights and biases aren't nullptr
-
 #ifdef USE_SIMD
     constexpr i32 regw = ALIGNMENT / sizeof(i16);
     constexpr i32 n_chunks = L1_SIZE / regw;
@@ -418,9 +416,9 @@ void NnueAccumulator::refresh_ti(
         for (i32 r = 0; r < 8; r++) store_i16(&ti_vals[perspective][(i + r) * regw], accs[r]);
     }
 #else
-    for (i32 i = 0; i < L1_SIZE; i++) ti_vals[perspective][i] = biases[i];
+    for (i32 i = 0; i < L1_SIZE; i++) ti_vals[perspective][i] = 0;
 
-    for (const i32 fidx : adds)
+    for (const i32 fidx : features)
         for (i32 i = 0; i < L1_SIZE; i++) ti_vals[perspective][i] += weights[fidx][i];
 #endif
 }
