@@ -45,13 +45,13 @@ public:
 
     /** Initializes the finny entry to equal the bias value
      *
-     * \param biases start of psq b0
+     * \param biases start of b0
      */
     void initialize(const i16 biases[L1_SIZE]);
 
     /** Updates the finny entry incrementally to match the new board state
      *
-     * \param weights start of psq W0
+     * \param weights start of W0_psq
      * \param board new board state, should match this entry's king bucket index & mirroring
      * \param perspective accumulator perspective, should match this entry's perspective
      * \param mirror whether to mirror the board, should match this entry's mirroring
@@ -172,7 +172,7 @@ public:
     /** Updates the psq accumulator values using the stored psq updates
      *
      * \param old_acc accumulator to use as base
-     * \param weights start of psq W0
+     * \param weights start of W0_psq
      * \param perspective accumulator perspective
      * \param mirror whether to mirror the board
      */
@@ -186,7 +186,7 @@ public:
     /** Updates the ti accumulator values using the stored ti updates
      *
      * \param old_acc accumulator to use as base
-     * \param weights start of ti W0
+     * \param weights start of W0_ti
      * \param perspective accumulator perspective
      * \param mirror whether to mirror the board
      */
@@ -206,15 +206,13 @@ public:
 
     /** Refreshes the stm ti accumulator by recomputing from the board state
      *
-     * \param weights start of ti W0
-     * \param biases start of ti b0
+     * \param weights start of W0_ti
      * \param board new board state
      * \param perspective accumulator perspective
      * \param mirror whether to mirror the board, should match this entry's mirroring
      */
     void refresh_ti(
         const i8 weights[N_THREATS][L1_SIZE],
-        const i8 biases[L1_SIZE],
         const chess::Board& board,
         chess::Color perspective,
         bool mirror

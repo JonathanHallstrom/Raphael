@@ -14,22 +14,19 @@ private:
 
     const i16 (*psq_weights_)[N_PSQ][L1_SIZE];
     const i8 (*ti_weights_)[L1_SIZE];
-    const i8* ti_biases_;
 
 
 public:
     /** Initializes the NnueState
      *
-     * \param psq_W0 start of psq W0 array
-     * \param psq_b0 start of psq b0 array
-     * \param ti_W0 start of ti W0 array
-     * \param ti_b0 start of ti b0 array
+     * \param W0_psq start of psq W0 array
+     * \param W0_ti start of ti W0 array
+     * \param b0 start of b0 array
      */
     NnueState(
-        const i16 psq_W0[N_INBUCKETS][N_PSQ][L1_SIZE],
-        const i16 psq_b0[L1_SIZE],
-        const i8 ti_W0[N_THREATS][L1_SIZE],
-        const i8 ti_b0[L1_SIZE]
+        const i16 W0_psq[N_INBUCKETS][N_PSQ][L1_SIZE],
+        const i8 W0_ti[N_THREATS][L1_SIZE],
+        const i16 b0[L1_SIZE]
     );
 
     /** Lazily updates the accumulator stacks and returns the top accumulator

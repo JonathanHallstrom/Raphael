@@ -6,17 +6,16 @@ using namespace raphael::nnue;
 
 
 NnueState::NnueState(
-    const i16 psq_W0[N_INBUCKETS][N_PSQ][L1_SIZE],
-    const i16 psq_b0[L1_SIZE],
-    const i8 ti_W0[N_THREATS][L1_SIZE],
-    const i8 ti_b0[L1_SIZE]
+    const i16 W0_psq[N_INBUCKETS][N_PSQ][L1_SIZE],
+    const i8 W0_ti[N_THREATS][L1_SIZE],
+    const i16 b0[L1_SIZE]
 )
-    : idx_(0), psq_weights_(psq_W0), ti_weights_(ti_W0), ti_biases_(ti_b0) {
+    : idx_(0), psq_weights_(W0_psq), ti_weights_(W0_ti) {
     // set the finny table entries to the bias
     for (const auto perspective : {chess::Color::WHITE, chess::Color::BLACK})
         for (const auto mirror : {false, true})
             for (i32 bucket = 0; bucket < N_INBUCKETS; bucket++)
-                finny_table_[perspective][mirror][bucket].initialize(psq_b0);
+                finny_table_[perspective][mirror][bucket].initialize(b0);
 }
 
 const NnueAccumulator& NnueState::get_top_accumulator(const chess::Board& board) {
@@ -42,7 +41,7 @@ void NnueState::set_board(const chess::Board& board) {
         accumulators_[idx_].refresh_psq(finny_table_[perspective][mirror][bucket], perspective);
 
         // refresh ti accumulator
-        accumulators_[idx_].refresh_ti(ti_weights_, ti_biases_, board, perspective, mirror);
+        accumulators_[idx_].refresh_ti(ti_weights_, board, perspective, mirror);
     }
 }
 
@@ -141,7 +140,7 @@ void NnueState::lazy_update(const chess::Board& board, chess::Color perspective)
 
     if (accumulators_[clean_idx].get_ti_state(perspective) == NnueAccumulator::AccState::REFRESH)
         // if we need to refresh, refresh at idx_ since we don't know the board state at clean_idx
-        accumulators_[idx_].refresh_ti(ti_weights_, ti_biases_, board, perspective, mirror);
+        accumulators_[idx_].refresh_ti(ti_weights_, board, perspective, mirror);
     else
         // otherwise, apply ti updates up the stack
         while (clean_idx++ < idx_)

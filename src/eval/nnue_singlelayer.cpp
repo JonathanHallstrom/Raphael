@@ -22,7 +22,7 @@ INCBIN(unsigned char, netfile, TOSTRING(NETWORK_FILE));
 
 
 
-Nnue::Nnue(): params(load_network()), state_(params->W0, params->b0, nullptr, nullptr) {}  // FIXME:
+Nnue::Nnue(): params(load_network()), state_(params->W0, nullptr, params->b0) {}  // FIXME:
 
 const Nnue::NnueParams* Nnue::load_network() {
     constexpr usize padded_size = 64 * ((sizeof(NnueParams) + 63) / 64);

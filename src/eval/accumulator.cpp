@@ -366,7 +366,6 @@ void NnueAccumulator::refresh_psq(const NnueFinnyEntry& finny_entry, chess::Colo
 
 void NnueAccumulator::refresh_ti(
     const i8 weights[N_THREATS][L1_SIZE],
-    const i8 biases[L1_SIZE],
     const chess::Board& board,
     chess::Color perspective,
     bool mirror
@@ -403,11 +402,7 @@ void NnueAccumulator::refresh_ti(
 
     for (i32 i = 0; i < n_chunks; i += 8) {
         #pragma GCC unroll 32
-        for (i32 r = 0; r < 4; r++) {
-            const VecI8 bs = load_i8(&biases[(i + 2 * r) * regw]);
-            accs[2 * r + 0] = low_i8_i16(bs);
-            accs[2 * r + 1] = high_i8_i16(bs);
-        }
+        for (i32 r = 0; r < 8; r++) accs[r] = zero_i16();
 
         // add features
         for (const i32 fidx : features) {
