@@ -41,7 +41,8 @@ void NnueState::set_board(const chess::Board& board) {
         );
         accumulators_[idx_].refresh_psq(finny_table_[perspective][mirror][bucket], perspective);
 
-        // FIXME: refresh ti accumulator too
+        // refresh ti accumulator
+        accumulators_[idx_].refresh_ti(ti_weights_, ti_biases_, board, perspective, mirror);
     }
 }
 
@@ -89,12 +90,18 @@ void NnueState::make_move(const chess::Board& board, chess::Move move) {
         accumulators_[idx_].rem_psq(ep_pawn, ep_sq);
     }
 
-    // need refresh if previous accumulator needs refresh or we change mirroring/bucket
+    // need psq refresh if previous accumulator needs refresh or we change mirroring/bucket
     if (accumulators_[idx_ - 1].get_psq_state(stm) == NnueAccumulator::AccState::REFRESH
         || (from_piece.type() == chess::PieceType::KING
             && ((needs_mirroring(from_sq) != needs_mirroring(new_king_sq))
                 || (king_bucket(from_sq, stm) != king_bucket(new_king_sq, stm)))))
         accumulators_[idx_].set_psq_state(stm, NnueAccumulator::AccState::REFRESH);
+
+    // need ti refresh if previous accumulator needs refresh or we change mirroring
+    if (accumulators_[idx_ - 1].get_ti_state(stm) == NnueAccumulator::AccState::REFRESH
+        || (from_piece.type() == chess::PieceType::KING
+            && needs_mirroring(from_sq) != needs_mirroring(new_king_sq)))
+        accumulators_[idx_].set_ti_state(stm, NnueAccumulator::AccState::REFRESH);
 }
 
 void NnueState::unmake_move() {
@@ -132,11 +139,10 @@ void NnueState::lazy_update(const chess::Board& board, chess::Color perspective)
     while (accumulators_[clean_idx].get_ti_state(perspective) == NnueAccumulator::AccState::DIRTY)
         clean_idx--;
 
-    if (accumulators_[clean_idx].get_ti_state(perspective) == NnueAccumulator::AccState::REFRESH) {
+    if (accumulators_[clean_idx].get_ti_state(perspective) == NnueAccumulator::AccState::REFRESH)
         // if we need to refresh, refresh at idx_ since we don't know the board state at clean_idx
-        // FIXME: actually do something
-        return;
-    } else
+        accumulators_[idx_].refresh_ti(ti_weights_, ti_biases_, board, perspective, mirror);
+    else
         // otherwise, apply ti updates up the stack
         while (clean_idx++ < idx_)
             accumulators_[clean_idx].apply_ti_updates(

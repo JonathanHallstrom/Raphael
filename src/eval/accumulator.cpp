@@ -59,7 +59,7 @@ static constexpr auto OFFSETS = [] {
     // offsets[piece][from] = global offset for attacker, attacker square features
     struct {
         array<pair<i32, i32>, 12> indicies{};
-        MultiArray<u32, 12, 64> offsets{};
+        MultiArray<i32, 12, 64> offsets{};
     } dst{};
 
     i32 offset = 0;
@@ -86,7 +86,7 @@ static constexpr auto OFFSETS = [] {
 
 static constexpr auto ATTACK_INDICIES = [] {
     // indicies[attacker][attacked][forwards] = global threat index offset
-    MultiArray<u32, 12, 12, 2> dst{};
+    MultiArray<i32, 12, 12, 2> dst{};
 
     for (chess::Piece atk = chess::Piece::WHITEPAWN; atk <= chess::Piece::BLACKKING; ++atk) {
         for (chess::Piece vic = chess::Piece::WHITEPAWN; vic <= chess::Piece::BLACKKING; ++vic) {
@@ -147,10 +147,8 @@ void NnueFinnyEntry::sync(
     chess::Color perspective,
     bool mirror
 ) {
-    i32 adds[32];
-    i32 subs[32];
-    i32 n_adds = 0;
-    i32 n_subs = 0;
+    StaticVector<i32, 32> adds;
+    StaticVector<i32, 32> subs;
 
     // compute diff from finny_entry
     for (chess::PieceType pt = chess::PieceType::PAWN; pt <= chess::PieceType::KING; ++pt) {
@@ -162,18 +160,14 @@ void NnueFinnyEntry::sync(
             while (adds_occ) {
                 const auto sq = chess::Square(adds_occ.poplsb());
                 const auto piece = chess::Piece(pt, color);
-
-                assert(n_adds < 32);
-                adds[n_adds++] = PSQFeature(piece, sq).index(perspective, mirror);
+                adds.push(PSQFeature(piece, sq).index(perspective, mirror));
             }
 
             auto subs_occ = old_occ & ~new_occ;
             while (subs_occ) {
                 const auto sq = chess::Square(subs_occ.poplsb());
                 const auto piece = chess::Piece(pt, color);
-
-                assert(n_subs < 32);
-                subs[n_subs++] = PSQFeature(piece, sq).index(perspective, mirror);
+                subs.push(PSQFeature(piece, sq).index(perspective, mirror));
             }
         }
     }
@@ -196,18 +190,14 @@ void NnueFinnyEntry::sync(
         for (i32 r = 0; r < 8; r++) accs[r] = load_i16(&values[(i + r) * regw]);
 
         // add features
-        for (i32 f = 0; f < n_adds; f++) {
-            const auto fidx = adds[f];
-
+        for (const i32 fidx : adds) {
             #pragma GCC unroll 32
             for (i32 r = 0; r < 8; r++)
                 accs[r] = add_i16(accs[r], load_i16(&weights[fidx][(i + r) * regw]));
         }
 
         // rem features
-        for (i32 f = 0; f < n_subs; f++) {
-            const auto fidx = subs[f];
-
+        for (const i32 fidx : subs) {
             #pragma GCC unroll 32
             for (i32 r = 0; r < 8; r++)
                 accs[r] = sub_i16(accs[r], load_i16(&weights[fidx][(i + r) * regw]));
@@ -217,10 +207,10 @@ void NnueFinnyEntry::sync(
         for (i32 r = 0; r < 8; r++) store_i16(&values[(i + r) * regw], accs[r]);
     }
 #else
-    for (i32 f = 0; f < n_adds; f++)
-        for (i32 i = 0; i < L1_SIZE; i++) values[i] += weights[adds[f]][i];
-    for (i32 f = 0; f < n_subs; f++)
-        for (i32 i = 0; i < L1_SIZE; i++) values[i] -= weights[subs[f]][i];
+    for (const i32 fidx : adds)
+        for (i32 i = 0; i < L1_SIZE; i++) values[i] += weights[fidx][i];
+    for (const i32 fidx : subs)
+        for (i32 i = 0; i < L1_SIZE; i++) values[i] -= weights[fidx][i];
 #endif
 }
 
@@ -372,5 +362,71 @@ void NnueAccumulator::apply_ti_updates(
 void NnueAccumulator::refresh_psq(const NnueFinnyEntry& finny_entry, chess::Color perspective) {
     copy(finny_entry.values, finny_entry.values + L1_SIZE, psq_vals[perspective]);
     set_psq_state(perspective, AccState::CLEAN);
+}
+
+void NnueAccumulator::refresh_ti(
+    const i8 weights[N_THREATS][L1_SIZE],
+    const i8 biases[L1_SIZE],
+    const chess::Board& board,
+    chess::Color perspective,
+    bool mirror
+) {
+    StaticVector<i32, 128> features;
+
+    // skip kings as we don't encode king threats
+    const auto occ = board.occ();
+    const auto nonkings = occ ^ chess::BitBoard::from_square(board.king_square(perspective));
+
+    auto from_occ = nonkings;
+    while (from_occ) {
+        const auto from = static_cast<chess::Square>(from_occ.poplsb());
+        const auto attacker = board.at(from);
+
+        auto attacked = nonkings & chess::Attacks::attacks(attacker, from, occ);
+        while (attacked) {
+            const auto to = static_cast<chess::Square>(attacked.poplsb());
+            const auto victim = board.at(to);
+            const i32 feature = TIFeature(attacker, victim, from, to).index(perspective, mirror);
+
+            if (feature < N_THREATS) features.push(feature);
+        }
+    }
+
+    return;  // FIXME: make sure weights and biases aren't nullptr
+
+#ifdef USE_SIMD
+    constexpr i32 regw = ALIGNMENT / sizeof(i16);
+    constexpr i32 n_chunks = L1_SIZE / regw;
+    static_assert(L1_SIZE % regw == 0);
+    static_assert(n_chunks % 8 == 0);
+    VecI16 accs[8];
+
+    for (i32 i = 0; i < n_chunks; i += 8) {
+        #pragma GCC unroll 32
+        for (i32 r = 0; r < 4; r++) {
+            const VecI8 bs = load_i8(&biases[(i + 2 * r) * regw]);
+            accs[2 * r + 0] = low_i8_i16(bs);
+            accs[2 * r + 1] = high_i8_i16(bs);
+        }
+
+        // add features
+        for (const i32 fidx : features) {
+            #pragma GCC unroll 32
+            for (i32 r = 0; r < 4; r++) {
+                const VecI8 ws = load_i8(&weights[fidx][(i + 2 * r) * regw]);
+                accs[2 * r + 0] = add_i16(accs[2 * r + 0], low_i8_i16(ws));
+                accs[2 * r + 1] = add_i16(accs[2 * r + 1], high_i8_i16(ws));
+            }
+        }
+
+        #pragma GCC unroll 32
+        for (i32 r = 0; r < 8; r++) store_i16(&ti_vals[perspective][(i + r) * regw], accs[r]);
+    }
+#else
+    for (i32 i = 0; i < L1_SIZE; i++) ti_vals[perspective][i] = biases[i];
+
+    for (const i32 fidx : adds)
+        for (i32 i = 0; i < L1_SIZE; i++) ti_vals[perspective][i] += weights[fidx][i];
+#endif
 }
 #endif
