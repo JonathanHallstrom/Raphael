@@ -21,7 +21,7 @@ INCBIN(unsigned char, netfile, TOSTRING(NETWORK_FILE));
 
 
 
-Nnue::Nnue(): params(load_network()), state_(params->W0, nullptr, params->b0) {}  // FIXME:
+Nnue::Nnue(): params(load_network()), state_(params->W0_psq, params->W0_ti, params->b0) {}
 
 const Nnue::NnueParams* Nnue::load_network() {
     constexpr usize padded_size = 64 * ((sizeof(NnueParams) + 63) / 64);
@@ -39,14 +39,15 @@ const Nnue::NnueParams* Nnue::load_network() {
 i32 Nnue::evaluate(const chess::Board& board) {
     // get address to accumulators
     const auto& acc = state_.get_top_accumulator(board);
-    const auto stm_acc = acc.psq_vals[board.stm()];
-    const auto ntm_acc = acc.psq_vals[~board.stm()];
+    const auto stm_acc_psq = acc.psq_vals[board.stm()];
+    const auto ntm_acc_psq = acc.psq_vals[~board.stm()];
+    const auto stm_acc_ti = acc.ti_vals[board.stm()];
+    const auto ntm_acc_ti = acc.ti_vals[~board.stm()];
 
     alignas(ALIGNMENT) u8 l0_out[L1_SIZE];
     SparseIterator sp;
-    // FIXME: use ti accumulators too
-    activate_l0(stm_acc, l0_out, sp);
-    activate_l0(ntm_acc, l0_out + L1_SIZE / 2, sp);
+    activate_l0(stm_acc_psq, stm_acc_ti, l0_out, sp);
+    activate_l0(ntm_acc_psq, ntm_acc_ti, l0_out + L1_SIZE / 2, sp);
 
     constexpr i32 bucket_div = (32 + N_OUTBUCKETS - 1) / N_OUTBUCKETS;
     const i32 bucket_idx = (board.occ().count() - 2) / bucket_div;
@@ -70,7 +71,10 @@ void Nnue::unmake_move() { state_.unmake_move(); }
 
 
 void Nnue::activate_l0(
-    const i16 acc[L1_SIZE], u8 l0_out[L1_SIZE / 2], [[maybe_unused]] SparseIterator& sp
+    const i16 acc_psq[L1_SIZE],
+    const i16 acc_ti[L1_SIZE],
+    u8 l0_out[L1_SIZE / 2],
+    [[maybe_unused]] SparseIterator& sp
 ) const {
     constexpr i32 n_pairs = L1_SIZE / 2;
 
@@ -84,19 +88,21 @@ void Nnue::activate_l0(
 
     for (i32 i = 0; i < n_chunks; i += 4) {
         // compute 4 * regw16 values of the pairwise mul at once, input in [0, QA]
-        const VecI16 acc0_v0 = clamp_i16(load_i16(&acc[(i + 0) * regw16]), zs, qa);
-        const VecI16 acc1_v0 = clamp_i16(load_i16(&acc[(i + 1) * regw16]), zs, qa);
-        const VecI16 acc2_v0 = clamp_i16(load_i16(&acc[(i + 2) * regw16]), zs, qa);
-        const VecI16 acc3_v0 = clamp_i16(load_i16(&acc[(i + 3) * regw16]), zs, qa);
-        const VecI16 acc0_v1 = clamp_i16(load_i16(&acc[(i + 0) * regw16 + n_pairs]), zs, qa);
-        const VecI16 acc1_v1 = clamp_i16(load_i16(&acc[(i + 1) * regw16 + n_pairs]), zs, qa);
-        const VecI16 acc2_v1 = clamp_i16(load_i16(&acc[(i + 2) * regw16 + n_pairs]), zs, qa);
-        const VecI16 acc3_v1 = clamp_i16(load_i16(&acc[(i + 3) * regw16 + n_pairs]), zs, qa);
+        VecI16 acc[4][2];
+        #pragma GCC unroll 4
+        for (i32 r = 0; r < 4; r++) {
+            const VecI16 acc_psq0 = load_i16(&acc_psq[(i + r) * regw16]);
+            const VecI16 acc_ti0 = load_i16(&acc_ti[(i + r) * regw16]);
+            const VecI16 acc_psq1 = load_i16(&acc_psq[(i + r) * regw16 + n_pairs]);
+            const VecI16 acc_ti1 = load_i16(&acc_ti[(i + r) * regw16 + n_pairs]);
+            acc[r][0] = clamp_i16(add_i16(acc_psq0, acc_ti0), zs, qa);
+            acc[r][1] = clamp_i16(add_i16(acc_psq1, acc_ti1), zs, qa);
+        }
 
-        const VecI16 pw0 = mulhi_i16(lshift_i16(acc0_v0, 7), acc0_v1);
-        const VecI16 pw1 = mulhi_i16(lshift_i16(acc1_v0, 7), acc1_v1);
-        const VecI16 pw2 = mulhi_i16(lshift_i16(acc2_v0, 7), acc2_v1);
-        const VecI16 pw3 = mulhi_i16(lshift_i16(acc3_v0, 7), acc3_v1);
+        const VecI16 pw0 = mulhi_i16(lshift_i16(acc[0][0], 7), acc[0][1]);
+        const VecI16 pw1 = mulhi_i16(lshift_i16(acc[1][0], 7), acc[1][1]);
+        const VecI16 pw2 = mulhi_i16(lshift_i16(acc[2][0], 7), acc[2][1]);
+        const VecI16 pw3 = mulhi_i16(lshift_i16(acc[3][0], 7), acc[3][1]);
 
         // packus will interleave every 8 values thus l1w must be permuted, output in [0, 127]
         const VecU8 out0 = pack_u8_i16(pw0, pw1);
@@ -109,8 +115,8 @@ void Nnue::activate_l0(
     }
 #else
     for (i32 i = 0; i < n_pairs; i++) {
-        const i32 acc_v0 = min(max(acc[i], i16(0)), i16(QA));
-        const i32 acc_v1 = min(max(acc[i + n_pairs], i16(0)), i16(QA));
+        const i32 acc_v0 = min(max(acc_psq[i] + acc_ti[i], i16(0)), i16(QA));
+        const i32 acc_v1 = min(max(acc_psq[i + n_pairs] + acc_ti[i + n_pairs], i16(0)), i16(QA));
 
         // simulate mulhi, assuming non-permuted weights
         l0_out[i] = ((acc_v0 << 7) * acc_v1) >> 16;

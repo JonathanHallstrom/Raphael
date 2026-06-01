@@ -29,7 +29,6 @@ public:
     };
 
     void permute_network() {
-        // FIXME: account for ti weights and biases too
         const auto current_perm = original_params->permutation;
         const auto current_idx = static_cast<u8>(current_perm);
         if (current_idx > 2) throw runtime_error("invalid network permutation");
@@ -100,35 +99,27 @@ private:
 
 
     void apply_perm(const u8 perm[8]) {
-        // permute W0 to cancel out packus
-        for (usize b = 0; b < nnue::N_INBUCKETS; b++) {
-            for (usize i = 0; i < nnue::N_PSQ; i++) {
-                for (usize j = 0; j < nnue::L1_SIZE; j += 64) {
-                    const auto src = &original_params->W0[b][i][j];
-                    auto dst = &processed_params->W0[b][i][j];
-
-                    for (usize jj = 0; jj < 64; jj++) {
-                        const auto src_chunk = jj / 8;
-                        const auto dst_chunk = perm[src_chunk];
-                        const auto offset = jj % 8;
-                        dst[8 * dst_chunk + offset] = src[jj];
-                    }
+        const auto perm_axis = [perm]<typename T>(const T* src, T* dst) {
+            for (usize j = 0; j < nnue::L1_SIZE; j += 64) {
+                for (usize jj = 0; jj < 64; jj++) {
+                    const auto src_chunk = jj / 8;
+                    const auto dst_chunk = perm[src_chunk];
+                    const auto offset = jj % 8;
+                    dst[j + 8 * dst_chunk + offset] = src[j + jj];
                 }
             }
-        }
+        };
+
+        // permute W0 to cancel out packus
+        for (usize b = 0; b < nnue::N_INBUCKETS; b++)
+            for (usize i = 0; i < nnue::N_PSQ; i++)
+                perm_axis(original_params->W0_psq[b][i], processed_params->W0_psq[b][i]);
+
+        for (usize i = 0; i < nnue::N_THREATS; i++)
+            perm_axis(original_params->W0_ti[i], processed_params->W0_ti[i]);
 
         // permute b0 to cancel out packus
-        for (usize j = 0; j < nnue::L1_SIZE; j += 64) {
-            const auto src = &original_params->b0[j];
-            auto dst = &processed_params->b0[j];
-
-            for (usize jj = 0; jj < 64; jj++) {
-                const auto src_chunk = jj / 8;
-                const auto dst_chunk = perm[src_chunk];
-                const auto offset = jj % 8;
-                dst[8 * dst_chunk + offset] = src[jj];
-            }
-        }
+        perm_axis(original_params->b0, processed_params->b0);
     }
 };
 
