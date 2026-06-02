@@ -7,8 +7,8 @@ import sys
 
 import numpy as np
 
-L1_SIZE = 1280
-L2_SIZE = 16
+L1_SIZE = 512
+L2_SIZE = 32
 L3_SIZE = 32
 NUM_INPUT_BUCKET = 16
 NUM_OUTPUT_BUCKET = 8
@@ -24,8 +24,10 @@ BUCKETS = [
     14, 14, 15, 15
 ]   # fmt: skip
 
+QA = 255
+
 NETWORK: dict[str, tuple[tuple[int], np.dtype]] = {
-    "l0w": ((NUM_INPUT_BUCKET, 12, 64, L1_SIZE), np.dtype(np.int16)),
+    "l0w": ((60144 + 768 * (NUM_INPUT_BUCKET + 1), L1_SIZE), np.dtype(np.float32)),
     "l0b": ((L1_SIZE,), np.dtype(np.int16)),
     "l1w": ((NUM_OUTPUT_BUCKET, L2_SIZE, L1_SIZE), np.dtype(np.int8)),
     "l1b": ((NUM_OUTPUT_BUCKET, L2_SIZE), np.dtype(np.int32)),
@@ -34,6 +36,8 @@ NETWORK: dict[str, tuple[tuple[int], np.dtype]] = {
     "l3w": ((NUM_OUTPUT_BUCKET, L3_SIZE), np.dtype(np.int32)),
     "l3b": ((NUM_OUTPUT_BUCKET,), np.dtype(np.int32)),
 }
+
+EXPORT_LAYERS = ["l0w_psq", "l0w_ti", "l0b", "l1w", "l1b", "l2w", "l2b", "l3w", "l3b"]
 
 
 def load_network(filename: str) -> dict[str, np.ndarray]:
@@ -57,12 +61,37 @@ def load_network(filename: str) -> dict[str, np.ndarray]:
     return net
 
 
+def separate_l0_weights(net: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+    # the exported l0w contains the ti weights, and bucket + factorized psq weights
+    # we want to extract the ti weights as i8 and psq weights as i16
+    l0w = net.pop("l0w")
+    l0w_ti = l0w[:60144, :]
+    l0w_psqf = l0w[60144 : 60144 + 768, :]
+    l0w_psq = l0w[60144 + 768 :, :].copy()
+
+    TI_CLIP = 127.0 / QA
+    l0w_ti_clipped = np.clip(l0w_ti, -TI_CLIP, TI_CLIP)
+    n_clipped = (l0w_ti_clipped != l0w_ti).sum()
+    print(f"Clipped {n_clipped} / {l0w_ti.size} TI weights")
+
+    l0w_psq += l0w_psqf.repeat(NUM_INPUT_BUCKET, axis=0)
+
+    net["l0w_psq"] = (
+        np.round(l0w_psq * QA)
+        .astype(np.int16)
+        .reshape((NUM_INPUT_BUCKET, 12, 64, L1_SIZE))
+    )
+    net["l0w_ti"] = np.round(l0w_ti_clipped * QA).astype(np.int8)
+
+    return net
+
+
 def merge_king_planes(net: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
     # since the buckets are at most 2 squares in any direction, any time our king is in
     # the bucket squares, the enemy king must be outside the bucket squares
     # thus, we can copy over the enemy king features to the same plane as our king
     # features, thus reducing the network size by 64 * NUM_INPUT_BUCKET parameters
-    ft = net["l0w"]
+    ft = net["l0w_psq"]
     merged_ft = ft[:, :11, :, :].copy()
 
     full_buckets = np.full((8, 8), -1, dtype=np.int16)
@@ -77,7 +106,7 @@ def merge_king_planes(net: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
         merged_ft[bucket, OUR_KING, bucket_mask, :] = ft[
             bucket, OUR_KING, bucket_mask, :
         ]
-    net["l0w"] = merged_ft
+    net["l0w_psq"] = merged_ft
 
     return net
 
@@ -91,11 +120,13 @@ def permute_sparsity(
         order = np.argsort(act)[::-1]  # [L1_SIZE // 2]
         perm = np.concatenate([order, order + (L1_SIZE // 2)])  # [L1_SIZE]
 
-    l0w = net["l0w"]  # [NUM_INPUT_BUCKETS, 11, 64, L1_SIZE]
+    l0w_psq = net["l0w_psq"]  # [NUM_INPUT_BUCKETS, 11, 64, L1_SIZE]
+    l0w_ti = net["l0w_ti"]  # [60144, L1_SIZE]
     l0b = net["l0b"]  # [L1_SIZE]
     l1w = net["l1w"]  # [NUM_OUTPUT_BUCKETS][L2_SIZE][L1_SIZE]
 
-    net["l0w"] = l0w[:, :, :, perm]
+    net["l0w_psq"] = l0w_psq[:, :, :, perm]
+    net["l0w_ti"] = l0w_ti[:, perm]
     net["l0b"] = l0b[perm]
     net["l1w"] = l1w[:, :, perm]
     return net
@@ -128,16 +159,25 @@ def write_network(
 ) -> None:
     filesize = 0
     with open(filename, "wb") as file:
-        for layer in net.values():
+        for i, layername in enumerate(EXPORT_LAYERS):
+            layer = net[layername]
             data = layer.flatten().tobytes()
-            filesize += len(data)
+            datasize = len(data)
+            padding = (
+                ((datasize + 63) // 64 * 64) - datasize
+                if i < len(EXPORT_LAYERS) - 1
+                else 0
+            )
+
+            filesize += datasize + padding
             file.write(data)
+            if padding:
+                file.write(bytes(padding))
 
         # write flags
+        filesize += 2
         file.write(np.int8(0).tobytes())  # 0 = NONE permutation
-        filesize += 1
         file.write(np.bool(sparsity_permed).tobytes())
-        filesize += 1
 
         padding_size = ((filesize + 63) // 64 * 64) - filesize
         file.write(bytes(padding_size))
@@ -150,6 +190,7 @@ if __name__ == "__main__":
 
     filename = sys.argv[1]
     net = load_network(filename)
+    net = separate_l0_weights(net)
     net = merge_king_planes(net)
 
     sparsity_permed = False

@@ -29,9 +29,6 @@ const Nnue::NnueParams* Nnue::load_network() {
     if (g_netfile_size != padded_size)
         throw runtime_error("network file and architecture doesn't match");
 
-    if (reinterpret_cast<uintptr_t>(g_netfile_data) % alignof(NnueParams) != 0)
-        throw runtime_error("network file isn't aligned properly");
-
     return reinterpret_cast<const NnueParams*>(g_netfile_data);
 }
 

@@ -28,9 +28,6 @@ const Nnue::NnueParams* Nnue::load_network() {
     if (g_netfile_size != padded_size)
         throw runtime_error("network file and architecture doesn't match");
 
-    if (reinterpret_cast<uintptr_t>(g_netfile_data) % alignof(NnueParams) != 0)
-        throw runtime_error("network file isn't aligned properly");
-
     return reinterpret_cast<const NnueParams*>(g_netfile_data);
 }
 
@@ -115,8 +112,8 @@ void Nnue::activate_l0(
     }
 #else
     for (i32 i = 0; i < n_pairs; i++) {
-        const i32 acc_v0 = min(max(acc_psq[i] + acc_ti[i], i16(0)), i16(QA));
-        const i32 acc_v1 = min(max(acc_psq[i + n_pairs] + acc_ti[i + n_pairs], i16(0)), i16(QA));
+        const i32 acc_v0 = min(max(acc_psq[i] + acc_ti[i], 0), QA);
+        const i32 acc_v1 = min(max(acc_psq[i + n_pairs] + acc_ti[i + n_pairs], 0), QA);
 
         // simulate mulhi, assuming non-permuted weights
         l0_out[i] = ((acc_v0 << 7) * acc_v1) >> 16;
