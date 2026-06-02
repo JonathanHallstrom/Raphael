@@ -27,7 +27,8 @@ BUCKETS = [
 QA = 255
 
 NETWORK: dict[str, tuple[tuple[int], np.dtype]] = {
-    "l0w": ((60144 + 768 * (NUM_INPUT_BUCKET + 1), L1_SIZE), np.dtype(np.float32)),
+    "l0w_ti": ((60144, L1_SIZE), np.dtype(np.float32)),
+    "l0w_psq": ((NUM_INPUT_BUCKET + 1, 768, L1_SIZE), np.dtype(np.float32)),
     "l0b": ((L1_SIZE,), np.dtype(np.int16)),
     "l1w": ((NUM_OUTPUT_BUCKET, L2_SIZE, L1_SIZE), np.dtype(np.int8)),
     "l1b": ((NUM_OUTPUT_BUCKET, L2_SIZE), np.dtype(np.int32)),
@@ -64,17 +65,15 @@ def load_network(filename: str) -> dict[str, np.ndarray]:
 def separate_l0_weights(net: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
     # the exported l0w contains the ti weights, and bucket + factorized psq weights
     # we want to extract the ti weights as i8 and psq weights as i16
-    l0w = net.pop("l0w")
-    l0w_ti = l0w[:60144, :]
-    l0w_psqf = l0w[60144 : 60144 + 768, :]
-    l0w_psq = l0w[60144 + 768 :, :].copy()
+    l0w_ti = net["l0w_ti"]
+    l0w_psq_all = net["l0w_psq"]
+    l0w_psqf = l0w_psq_all[0, :, :]
+    l0w_psq = l0w_psq_all[1:, :, :] + l0w_psqf
 
     TI_CLIP = 127.0 / QA
     l0w_ti_clipped = np.clip(l0w_ti, -TI_CLIP, TI_CLIP)
     n_clipped = (l0w_ti_clipped != l0w_ti).sum()
     print(f"Clipped {n_clipped} / {l0w_ti.size} TI weights")
-
-    l0w_psq += l0w_psqf.repeat(NUM_INPUT_BUCKET, axis=0)
 
     net["l0w_psq"] = (
         np.round(l0w_psq * QA)
